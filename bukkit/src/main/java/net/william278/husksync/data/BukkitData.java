@@ -38,11 +38,7 @@ import org.bukkit.attribute.AttributeModifier;
 import org.bukkit.entity.EntityType;
 import org.bukkit.entity.Player;
 import org.bukkit.event.inventory.InventoryType;
-//#if MC==12001
-//$$ import org.bukkit.inventory.EquipmentSlot;
-//#else
 import org.bukkit.inventory.EquipmentSlotGroup;
-//#endif
 import org.bukkit.inventory.ItemStack;
 import org.bukkit.persistence.PersistentDataContainer;
 import org.bukkit.plugin.Plugin;
@@ -620,33 +616,18 @@ public abstract class BukkitData implements Data {
                     instance.getBaseValue(),
                     instance.getModifiers().stream()
                             .filter(modifier -> !settings.isIgnoredModifier(modifier.getName()))
-                            //#if MC==12001
-                            //$$ .filter(modifier -> modifier.getSlot() == null)
-                            //#else
-                            .filter(modifier -> modifier.getSlotGroup() != EquipmentSlotGroup.ANY)
-                            //#endif
                             .map(BukkitData.Attributes::adapt).collect(Collectors.toSet())
             );
         }
 
         @NotNull
         private static Modifier adapt(@NotNull AttributeModifier modifier) {
-            //#if MC==12001
-            //$$ return new Modifier(
-            //$$        modifier.getUniqueId(),
-            //$$        modifier.getName(),
-            //$$        modifier.getAmount(),
-            //$$        modifier.getOperation().ordinal(),
-            //$$        modifier.getSlot() != null ? modifier.getSlot().ordinal() : -1
-            //$$ );
-            //#else
             return new Modifier(
                     modifier.getKey().toString(),
                     modifier.getAmount(),
                     modifier.getOperation().ordinal(),
                     modifier.getSlotGroup().toString()
             );
-            //#endif
         }
 
         private static void applyAttribute(@Nullable AttributeInstance instance, @Nullable Attribute attribute) {
@@ -659,36 +640,29 @@ public abstract class BukkitData implements Data {
                 attribute.modifiers().stream()
                         .filter(mod -> instance.getModifiers().stream().map(AttributeModifier::getName)
                                 .noneMatch(n -> n.equals(mod.name())))
-                        .distinct().filter(mod -> !mod.hasUuid())
+                        .distinct()
                         .forEach(mod -> instance.addModifier(adapt(mod)));
             }
         }
 
         @NotNull
         private static AttributeModifier adapt(@NotNull Modifier modifier) {
-            //#if MC==12001
-            //$$ return new AttributeModifier(
-            //$$        modifier.uuid(),
-            //$$        modifier.name(),
-            //$$        modifier.amount(),
-            //$$        AttributeModifier.Operation.values()[modifier.operation()],
-            //$$        modifier.equipmentSlot() != -1 ? EquipmentSlot.values()[modifier.equipmentSlot()] : null
-            //$$ );
-            //#else
             return new AttributeModifier(
                     Objects.requireNonNull(NamespacedKey.fromString(modifier.name())),
                     modifier.amount(),
                     AttributeModifier.Operation.values()[modifier.operation()],
                     Optional.ofNullable(EquipmentSlotGroup.getByName(modifier.slotGroup())).orElse(EquipmentSlotGroup.ANY)
             );
-            //#endif
         }
 
         @Override
         public void apply(@NotNull BukkitUser user, @NotNull BukkitHuskSync plugin) throws IllegalStateException {
             if (!Bukkit.isPrimaryThread()) {
                 try {
-                    Bukkit.getScheduler().callSyncMethod(plugin, () -> { this.apply(user, plugin); return null; }).get();
+                    Bukkit.getScheduler().callSyncMethod(plugin, () -> {
+                        this.apply(user, plugin);
+                        return null;
+                    }).get();
                     return;
                 } catch (Exception e) {
                     throw new IllegalStateException("Failed to apply attributes on main thread", e);
@@ -753,6 +727,14 @@ public abstract class BukkitData implements Data {
         @Override
         @SuppressWarnings("deprecation")
         public void apply(@NotNull BukkitUser user, @NotNull BukkitHuskSync plugin) throws IllegalStateException {
+            if (!Bukkit.isPrimaryThread()) {
+                try {
+                    Bukkit.getScheduler().callSyncMethod(plugin, () -> { this.apply(user, plugin); return null; }).get();
+                    return;
+                } catch (Exception e) {
+                    throw new IllegalStateException("Failed to apply health on main thread", e);
+                }
+            }
             final Player player = user.getPlayer();
 
             // Set health
@@ -837,6 +819,10 @@ public abstract class BukkitData implements Data {
             final Player player = user.getPlayer();
             player.setTotalExperience(totalExperience);
             player.setLevel(expLevel);
+            if (expProgress < 0f || expProgress > 1f) {
+                plugin.log(Level.WARNING, "Invalid experience progress value: " + expProgress + ". Must be between 0 and 1.");
+                return;
+            }
             player.setExp(expProgress);
         }
 
